@@ -103,9 +103,13 @@ details.tips ul{margin:10px 0 0;padding-left:18px;display:flex;flex-direction:co
 .modal img{max-width:100%;max-height:65vh;object-fit:contain}
 @media (max-width:860px){
   .wrap{grid-template-columns:minmax(0,1fr)}
-  .stage{position:static;order:-1}
-  #preview{max-height:62vh;max-height:62dvh}
-  .canvas-box{padding:10px}
+  .stage{order:-1;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:8px;gap:8px;margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding-inline:max(16px,env(safe-area-inset-left,0px));box-shadow:0 6px 12px -8px rgba(0,0,0,.25)}
+  #preview{max-height:40vh;max-height:40dvh}
+  .canvas-box{padding:8px}
+  .tools{padding:8px;gap:8px}
+  .tools .seg button{min-height:38px}
+  #toolHint,#sizeInfo{display:none}
+  .stage .bar{gap:6px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -576,6 +580,7 @@ function draw(){
     L = computeLayout(W, H);
     L.cells.forEach(c => clampPan(state.photos[c.i], c.w, c.h));
     render(cx, L, true);
+    thumbs();
     $('sizeInfo').textContent = `${W} × ${H} px · ${state.format === '9:16' ? 'Historias y reels' : state.format === '4:5' ? 'Feed de Instagram y Facebook' : 'Post cuadrado'}`;
   });
 }
@@ -606,8 +611,10 @@ function syncPhotoUI(){
 }
 function thumbs(){
   document.querySelectorAll('.slot').forEach(b => {
-    const p = state.photos[+b.dataset.i]; const t = toCanvas(p.adj, 240);
-    b.querySelector('.thumb').style.backgroundImage = `url(${t.toDataURL('image/jpeg', .7)})`;
+    const p = state.photos[+b.dataset.i];
+    const t = document.createElement('canvas'); t.width = 180; t.height = 240;
+    drawPhoto(t.getContext('2d'), p, {x:0, y:0, w:180, h:240});
+    b.querySelector('.thumb').style.backgroundImage = `url(${t.toDataURL('image/jpeg', .75)})`;
   });
 }
 let adjT = 0;
