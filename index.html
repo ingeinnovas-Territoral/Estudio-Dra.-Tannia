@@ -83,6 +83,12 @@ label.up input{position:absolute;opacity:0;width:1px;height:1px}
 .hint{font-size:12px;color:var(--muted);margin:0}
 .tools{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .tools .seg{flex:1 1 260px}
+.retouch{display:flex;flex-direction:column;gap:8px;flex-basis:100%}
+.tools .retouch .seg,.tools .retouch .pens{flex:none}
+#rtool button{font-size:12px;min-height:38px;padding:6px 4px}
+#emojiRow button{font-size:22px;line-height:1;padding:6px 10px;border-radius:10px;border:1px solid var(--line);background:transparent;cursor:pointer;min-height:42px}
+#emojiRow button[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#holdOrig{-webkit-user-select:none;user-select:none}
 .tools .seg button{min-height:42px;font-weight:600}
 .pens{display:flex;flex-wrap:wrap;gap:8px;align-items:center;flex:1 1 300px}
 .pen{width:32px;height:32px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
@@ -169,18 +175,26 @@ details.tips ul{margin:10px 0 0;padding-left:18px;display:flex;flex-direction:co
         </div>
       </div>
 
+      <div class="field"><span class="lbl">Embellecer · igual en las dos fotos</span>
+        <div class="slider"><label for="glow">Luz suave</label><input type="range" id="glow" min="0" max="100" step="1"><output id="o-glow"></output></div>
+        <div class="slider"><label for="sharp">Nitidez</label><input type="range" id="sharp" min="0" max="100" step="1"><output id="o-sharp"></output></div>
+        <p class="hint">Se aplica igual al antes y al después para que la comparación siga siendo honesta.</p>
+      </div>
+
       <div class="field"><span class="lbl">Etiqueta</span>
         <input type="text" id="label" aria-label="Etiqueta de la foto">
         <div class="row" id="subChips"></div>
       </div>
 
       <div class="field"><span class="lbl">Privacidad</span>
-        <label class="check"><input type="checkbox" id="blurOn"> Difuminar ojos</label>
-        <div class="seg" id="blurStyle" role="group" aria-label="Tipo de difuminado">
+        <label class="check"><input type="checkbox" id="blurOn"> Cubrir ojos</label>
+        <div class="seg" id="blurStyle" role="group" aria-label="Cómo cubrir los ojos">
           <button data-v="blur">Difuminado</button>
-          <button data-v="pixel">Pixelado</button>
-          <button data-v="bar">Barra</button>
+          <button data-v="franja">Franja</button>
+          <button data-v="antifaz">Antifaz</button>
+          <button data-v="emoji">Emoji</button>
         </div>
+        <div class="row" id="emojiRow" hidden></div>
         <p class="hint">Mueve el recuadro sobre los ojos en la vista previa. Arrastra la esquina para cambiar su tamaño.</p>
       </div>
     </section>
@@ -236,6 +250,21 @@ details.tips ul{margin:10px 0 0;padding-left:18px;display:flex;flex-direction:co
         <button data-v="move">Mover</button>
         <button data-v="draw">Dibujar</button>
         <button data-v="brush">Difuminar</button>
+        <button data-v="retouch">Retocar</button>
+      </div>
+      <div class="retouch" id="retouch" hidden>
+        <div class="seg" id="rtool" role="group" aria-label="Tipo de retoque">
+          <button data-v="red">Quitar sangre</button>
+          <button data-v="heal">Corrector</button>
+          <button data-v="smooth">Suavizar piel</button>
+          <button data-v="protect">Proteger zona</button>
+          <button data-v="erase">Borrador</button>
+        </div>
+        <div class="pens">
+          <input type="range" id="brushR" min="6" max="80" step="1" aria-label="Tamaño del pincel">
+          <button class="btn" id="holdOrig">Ver original</button>
+          <button class="btn" id="clearRetouch">Quitar retoques</button>
+        </div>
       </div>
       <div class="pens" id="pens">
         <span id="penColors" class="row"></span>
@@ -296,13 +325,14 @@ const CITIES = ['Villavicencio','Yopal','Bogotá'];
 
 function newPhoto(label, sub){
   return {src:null, adj:null, sample:true, rot:0, angle:0, flip:false, zoom:1, ox:0, oy:0,
-    bright:0, contrast:0, warmth:0, sat:0, label, sub, blur:{on:false,x:.2,y:.3,w:.6,h:.13}, strokes:[], blurStrokes:[]};
+    bright:0, contrast:0, warmth:0, sat:0, label, sub, blur:{on:false,x:.2,y:.3,w:.6,h:.13}, strokes:[], blurStrokes:[], masks:{}};
 }
 const PEN_COLORS = [['#FFFFFF','Blanco'],['#1B1B1D','Negro'],['#D2577F','Rosa'],['#C9A15A','Dorado']];
 const history = [];
 const state = {
   format:'4:5', layout:'lado', active:0, blurStyle:'blur', guides:false,
-  tool:'move', penColor:'#FFFFFF', penSize:8,
+  tool:'move', penColor:'#FFFFFF', penSize:8, rtool:'red', brushR:22, showOriginal:false, emoji:'🤍',
+  beauty:{glow:0, sharp:0},
   photos:[newPhoto('Antes',''), newPhoto('Después','30 días')],
   brand:{name:'Dra. Tannia Camargo', spec:'Armonización orofacial', proc:'Alectomía', procCustom:'', procSub:'Afinamiento de las alas nasales', showProc:true, cta:ctaFor('RINO'), showCta:true,
     handle:'@dratanniacamargo', cities:{'Villavicencio':true,'Yopal':true,'Bogotá':false},
@@ -364,7 +394,62 @@ function loadFile(file){
     im.src = url;
   });
 }
+function blurCanvas(src, factor){
+  const w = src.width, h = src.height;
+  const t = document.createElement('canvas'); t.width = Math.max(1, Math.round(w/factor)); t.height = Math.max(1, Math.round(h/factor));
+  const tx = t.getContext('2d'); tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = 'high'; tx.drawImage(src, 0, 0, t.width, t.height);
+  const o = document.createElement('canvas'); o.width = w; o.height = h;
+  const ox = o.getContext('2d'); ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = 'high';
+  if (factor > 6){
+    const m = document.createElement('canvas'); m.width = Math.min(w, t.width*3); m.height = Math.min(h, t.height*3);
+    const mx = m.getContext('2d'); mx.imageSmoothingEnabled = true; mx.imageSmoothingQuality = 'high'; mx.drawImage(t, 0, 0, m.width, m.height);
+    ox.drawImage(m, 0, 0, w, h);
+  } else ox.drawImage(t, 0, 0, w, h);
+  return o;
+}
+const pixels = c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+const used = (p, k) => !!(p.masks[k] && p.masks[k].used);
 function buildAdj(p){
+  buildColor(p);
+  const bt = state.beauty, any = ['red','heal','smooth'].some(k => used(p, k));
+  if (!any && !bt.glow && !bt.sharp) return;
+  const base = p.adj;
+  const c = document.createElement('canvas'); c.width = base.width; c.height = base.height;
+  const x = c.getContext('2d'); x.drawImage(base, 0, 0);
+  const d = x.getImageData(0, 0, c.width, c.height), a = d.data;
+  const S = Math.max(c.width, c.height);
+  const big = (used(p,'heal') || used(p,'red')) ? pixels(blurCanvas(c, S/36)) : null;
+  const mid = (used(p,'smooth') || bt.glow) ? pixels(blurCanvas(c, Math.max(2, S/260))) : null;
+  const fine = bt.sharp ? pixels(blurCanvas(c, Math.max(1.5, S/900))) : null;
+  const mk = k => used(p,k) ? pixels(blurCanvas(p.masks[k].c, 3)) : null;
+  const mR = mk('red'), mH = mk('heal'), mS = mk('smooth'), mP = used(p,'protect') ? pixels(blurCanvas(p.masks.protect.c, 2)) : null;
+  const G = bt.glow/100 * 0.32, SH = bt.sharp/100 * 1.1;
+  for (let i = 0; i < a.length; i += 4){
+    let r = a[i], g = a[i+1], bl = a[i+2];
+    const keep = mP ? 1 - mP[i+3]/255 : 1;
+    if (keep > 0){
+      if (mH){ const m = mH[i+3]/255 * keep; if (m){ r += (big[i]-r)*m; g += (big[i+1]-g)*m; bl += (big[i+2]-bl)*m; } }
+      if (mS){ const m = mS[i+3]/255 * keep * 0.75; if (m){ r += (mid[i]-r)*m; g += (mid[i+1]-g)*m; bl += (mid[i+2]-bl)*m; } }
+      if (mR){ const m = mR[i+3]/255 * keep;
+        if (m){
+          // solo cambia lo que está más rojo que la piel de alrededor (sangre, puntos, irritación)
+          const red = r - (g + bl)/2, redB = big[i] - (big[i+1] + big[i+2])/2;
+          const e = Math.max(0, Math.min(1, (red - redB - 6) / 35)) * m;
+          if (e){
+            const L = 0.299*r + 0.587*g + 0.114*bl, LB = 0.299*big[i] + 0.587*big[i+1] + 0.114*big[i+2] || 1;
+            const k = Math.max(0.8, Math.min(1.1, (L + (LB - L)*0.6) / LB));
+            r += (big[i]*k - r)*e; g += (big[i+1]*k - g)*e; bl += (big[i+2]*k - bl)*e;
+          }
+        } }
+    }
+    if (G){ r += ((255 - (255-r)*(255-mid[i])/255) - r)*G; g += ((255 - (255-g)*(255-mid[i+1])/255) - g)*G; bl += ((255 - (255-bl)*(255-mid[i+2])/255) - bl)*G; }
+    if (SH){ r += (r - fine[i])*SH; g += (g - fine[i+1])*SH; bl += (bl - fine[i+2])*SH; }
+    a[i] = r; a[i+1] = g; a[i+2] = bl;
+  }
+  x.putImageData(d, 0, 0);
+  p.adj = c;
+}
+function buildColor(p){
   const {bright:b, contrast:ct, warmth:w, sat:s} = p;
   if (!b && !ct && !w && !s){ p.adj = p.src; return; }
   const c = document.createElement('canvas'); c.width = p.src.width; c.height = p.src.height;
@@ -417,7 +502,8 @@ function clampPan(p, cw, ch){
   const mx = Math.max(0, (k.ew*k.sc - k.needW) / 2) / cw, my = Math.max(0, (k.eh*k.sc - k.needH) / 2) / ch;
   p.ox = Math.max(-mx, Math.min(mx, p.ox)); p.oy = Math.max(-my, Math.min(my, p.oy));
 }
-function drawPhoto(x, p, cell){
+function drawPhoto(x, p, cell, img){
+  const im = img || (state.showOriginal ? p.src : p.adj);
   const {x:cx, y:cy, w:cw, h:ch} = cell;
   const k = coverScale(p, cw, ch);
   x.save(); x.beginPath(); x.rect(cx, cy, cw, ch); x.clip();
@@ -425,8 +511,38 @@ function drawPhoto(x, p, cell){
   x.rotate(p.rot * Math.PI/2 + p.angle * Math.PI/180);
   x.scale(p.flip ? -k.sc : k.sc, k.sc);
   x.imageSmoothingQuality = 'high';
-  x.drawImage(p.adj, -p.adj.width/2, -p.adj.height/2);
+  x.drawImage(im, -im.width/2, -im.height/2);
   x.restore();
+}
+function toPhotoXY(p, cell, pt){
+  const k = coverScale(p, cell.w, cell.h);
+  const vx = pt.x - (cell.x + cell.w/2 + p.ox*cell.w), vy = pt.y - (cell.y + cell.h/2 + p.oy*cell.h);
+  const t = -(p.rot*Math.PI/2 + p.angle*Math.PI/180), co = Math.cos(t), si = Math.sin(t);
+  let ux = (vx*co - vy*si) / k.sc, uy = (vx*si + vy*co) / k.sc;
+  if (p.flip) ux = -ux;
+  return {x: ux + p.src.width/2, y: uy + p.src.height/2, sc: k.sc};
+}
+function getMask(p, k){
+  if (!p.masks[k]){ const c = document.createElement('canvas'); c.width = p.src.width; c.height = p.src.height; p.masks[k] = {c, used:false, tint:null}; }
+  return p.masks[k];
+}
+function paintMask(p, k, a, b, rad, erase){
+  const list = erase ? ['red','heal','smooth','protect'].filter(n => p.masks[n]) : [k];
+  list.forEach(n => {
+    const m = getMask(p, n), x = m.c.getContext('2d');
+    x.save(); x.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+    x.strokeStyle = '#fff'; x.fillStyle = '#fff'; x.lineCap = 'round'; x.lineWidth = rad*2;
+    x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke();
+    x.beginPath(); x.arc(b.x, b.y, rad, 0, Math.PI*2); x.fill();
+    x.restore();
+    if (!erase) m.used = true; m.tint = null;
+  });
+}
+function tinted(m, color){
+  if (m.tint && m.tint.color === color) return m.tint.c;
+  const c = document.createElement('canvas'); c.width = m.c.width; c.height = m.c.height;
+  const x = c.getContext('2d'); x.drawImage(m.c, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
+  m.tint = {c, color}; return c;
 }
 function blurRect(p, cell){
   const b = p.blur;
@@ -437,19 +553,56 @@ function drawBlur(x, p, cell){
   const r = blurRect(p, cell); if (r.w < 4 || r.h < 4) return;
   const style = state.blurStyle;
   x.save(); x.beginPath(); x.rect(cell.x, cell.y, cell.w, cell.h); x.clip();
+  const th = THEMES[state.brand.theme];
+  if (style === 'antifaz'){ drawMask(x, r, th); x.restore(); return; }
   rr(x, r.x, r.y, r.w, r.h, Math.min(r.h/2, 26)); x.clip();
-  if (style === 'bar'){ x.fillStyle = '#111'; x.fillRect(r.x, r.y, r.w, r.h); x.restore(); return; }
-  const k = style === 'pixel' ? 16 : 28;
+  const k = 28;
   const t = document.createElement('canvas'); t.width = Math.max(1, Math.round(r.w/k)); t.height = Math.max(1, Math.round(r.h/k));
   const tx = t.getContext('2d'); tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = 'high';
   tx.drawImage(x.canvas, r.x, r.y, r.w, r.h, 0, 0, t.width, t.height);
-  if (style === 'pixel'){ x.imageSmoothingEnabled = false; x.drawImage(t, r.x, r.y, r.w, r.h); }
-  else {
+  {
     const m = document.createElement('canvas'); m.width = t.width*4; m.height = t.height*4;
     const mx = m.getContext('2d'); mx.imageSmoothingEnabled = true; mx.imageSmoothingQuality = 'high'; mx.drawImage(t, 0, 0, m.width, m.height);
     x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(m, r.x, r.y, r.w, r.h);
   }
+  if (style === 'franja'){
+    x.fillStyle = th.bg; x.globalAlpha = 0.9; x.fillRect(r.x, r.y, r.w, r.h); x.globalAlpha = 1;
+    x.strokeStyle = th.accent; x.lineWidth = 2;
+    const inset = Math.min(10, r.h*0.12); rr(x, r.x+inset, r.y+inset, r.w-2*inset, r.h-2*inset, Math.min(r.h/2, 26) - inset/2); x.stroke();
+    star(x, r.x + r.w/2, r.y + r.h/2, Math.min(r.h*0.22, 22), th.accent);
+  }
+  if (style === 'emoji'){
+    x.globalAlpha = 0.35; x.fillStyle = th.bg; x.fillRect(r.x, r.y, r.w, r.h); x.globalAlpha = 1;
+    const size = Math.min(r.h*0.95, r.w*0.3);
+    x.font = `${Math.round(size)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(state.emoji, r.x + r.w*0.28, r.y + r.h/2 + size*0.05);
+    x.fillText(state.emoji, r.x + r.w*0.72, r.y + r.h/2 + size*0.05);
+  }
   x.restore();
+}
+function star(x, cx, cy, R, color){
+  x.save(); x.fillStyle = color; x.beginPath();
+  for (let i = 0; i < 8; i++){ const a = i*Math.PI/4 - Math.PI/2, rr2 = i % 2 ? R*0.28 : R; x.lineTo(cx + Math.cos(a)*rr2, cy + Math.sin(a)*rr2); }
+  x.closePath(); x.fill(); x.restore();
+}
+function drawMask(x, r, th){
+  const {x:X, y:Y, w:W, h:H} = r, mx = X + W/2;
+  x.beginPath();
+  x.moveTo(X, Y + H*0.42);
+  x.bezierCurveTo(X + W*0.02, Y - H*0.05, X + W*0.36, Y - H*0.08, mx, Y + H*0.26);
+  x.bezierCurveTo(X + W*0.64, Y - H*0.08, X + W*0.98, Y - H*0.05, X + W, Y + H*0.42);
+  x.bezierCurveTo(X + W*0.97, Y + H*1.05, X + W*0.62, Y + H*1.12, mx, Y + H*0.7);
+  x.bezierCurveTo(X + W*0.38, Y + H*1.12, X + W*0.03, Y + H*1.05, X, Y + H*0.42);
+  x.closePath();
+  const g = x.createLinearGradient(X, Y, X + W, Y + H);
+  g.addColorStop(0, th.accent); g.addColorStop(0.5, th.bg); g.addColorStop(1, th.accent);
+  x.save(); x.shadowColor = 'rgba(0,0,0,.28)'; x.shadowBlur = 12; x.fillStyle = g; x.fill(); x.restore();
+  x.lineWidth = 3; x.strokeStyle = '#C9A15A'; x.stroke();
+  x.save(); x.clip(); x.globalAlpha = 0.18; x.strokeStyle = '#FFFFFF'; x.lineWidth = 2;
+  for (let i = -H; i < W; i += 14){ x.beginPath(); x.moveTo(X + i, Y + H*1.1); x.lineTo(X + i + H*1.1, Y); x.stroke(); }
+  x.restore();
+  star(x, mx, Y + H*0.47, Math.min(H*0.14, 14), '#C9A15A');
 }
 function strokePath(x, s, cell, color){
   const pts = s.pts, X = q => cell.x + q[0]*cell.w, Y = q => cell.y + q[1]*cell.h;
@@ -581,6 +734,15 @@ function render(x, L, ui){
   }
   x.textAlign = 'left';
   // ayudas visuales (solo vista previa)
+  if (ui && state.tool === 'retouch' && !state.showOriginal){
+    L.cells.forEach(cell => {
+      const p = state.photos[cell.i];
+      [['protect','#2FA36B',0.4],['red','#E0567F',0.28],['heal','#E0567F',0.28],['smooth','#E0567F',0.28]].forEach(([k, col, al]) => {
+        if (!p.masks[k] || (!p.masks[k].used && k !== 'protect')) return;
+        x.save(); x.globalAlpha = al; drawPhoto(x, p, cell, tinted(p.masks[k], col)); x.restore();
+      });
+    });
+  }
   if (ui){
     L.cells.forEach(cell => {
       const p = state.photos[cell.i];
@@ -674,7 +836,7 @@ async function setPhoto(i, file){
   try{
     const im = await loadFile(file);
     const p = state.photos[i];
-    p.src = toCanvas(im, 1800); p.sample = false; p.strokes = []; p.blurStrokes = []; p.rot = 0; p.angle = 0; p.zoom = 1; p.ox = 0; p.oy = 0; p.flip = false;
+    p.src = toCanvas(im, 1800); p.sample = false; p.strokes = []; p.blurStrokes = []; p.masks = {}; p.rot = 0; p.angle = 0; p.zoom = 1; p.ox = 0; p.oy = 0; p.flip = false;
     buildAdj(p); state.active = i; syncPhotoUI(); thumbs(); draw();
     toast(i === 0 ? 'Foto del antes cargada' : 'Foto del después cargada');
   } catch(err){ toast('No se pudo abrir esa imagen. Prueba con un JPG o PNG.'); }
@@ -742,17 +904,51 @@ $('guides').addEventListener('change', e => { state.guides = e.target.checked; d
 const HINTS = {
   move: 'Arrastra para mover la foto. En iPhone y iPad pellizca con dos dedos para acercar.',
   draw: 'Dibuja flechas o marca la zona tratada. Con el Apple Pencil el trazo cambia según la presión y el dedo sigue moviendo la foto.',
-  brush: 'Pinta sobre lo que quieras ocultar (ojos, tatuajes, lunares). Con el Apple Pencil el dedo sigue moviendo la foto.'
+  brush: 'Pinta sobre lo que quieras ocultar (ojos, tatuajes, lunares). Con el Apple Pencil el dedo sigue moviendo la foto.',
+  retouch: 'Primero pinta en verde la zona del procedimiento con «Proteger zona»: ningún retoque la toca. Luego pasa el pincel sobre sangre, granitos o manchas. Mantén «Ver original» para comparar.'
 };
 function syncTool(){
   syncSeg('tool', state.tool);
-  $('pens').hidden = state.tool === 'move';
+  $('pens').hidden = state.tool === 'move' || state.tool === 'retouch';
+  $('retouch').hidden = state.tool !== 'retouch';
   $('penColors').hidden = state.tool !== 'draw';
   $('toolHint').textContent = HINTS[state.tool];
   document.body.classList.toggle('tool-draw', state.tool === 'draw');
   document.body.classList.toggle('tool-brush', state.tool === 'brush');
 }
 bindSeg('tool', 'tool', syncTool);
+bindSeg('rtool', 'rtool');
+syncSeg('rtool', state.rtool);
+$('brushR').value = state.brushR;
+$('brushR').addEventListener('input', e => { state.brushR = +e.target.value; });
+const holdOn = e => { e.preventDefault(); state.showOriginal = true; $('holdOrig').classList.add('primary'); draw(); };
+const holdOff = () => { if (!state.showOriginal) return; state.showOriginal = false; $('holdOrig').classList.remove('primary'); draw(); };
+$('holdOrig').addEventListener('pointerdown', holdOn);
+['pointerup','pointerleave','pointercancel'].forEach(ev => $('holdOrig').addEventListener(ev, holdOff));
+$('holdOrig').addEventListener('contextmenu', e => e.preventDefault());
+$('clearRetouch').onclick = () => {
+  const p = P(); if (!Object.values(p.masks).some(m => m.used)){ toast('Esta foto no tiene retoques'); return; }
+  p.masks = {}; buildAdj(p); thumbsLater(); draw(); toast('Retoques quitados de esta foto');
+};
+let thT = 0; function thumbsLater(){ clearTimeout(thT); thT = setTimeout(thumbs, 60); }
+['glow','sharp'].forEach(k => {
+  $(k).value = state.beauty[k]; $('o-'+k).textContent = state.beauty[k];
+  let t = 0;
+  $(k).addEventListener('input', e => {
+    state.beauty[k] = +e.target.value; $('o-'+k).textContent = e.target.value;
+    clearTimeout(t); t = setTimeout(() => { state.photos.forEach(buildAdj); draw(); }, 60);
+  });
+});
+const EMOJIS = ['🤍','✨','🌸','🦋','🌷','💫'];
+EMOJIS.forEach(em => {
+  const b = document.createElement('button'); b.textContent = em; b.setAttribute('aria-label', 'Emoji ' + em);
+  b.setAttribute('aria-pressed', String(em === state.emoji));
+  b.onclick = () => { state.emoji = em; $('emojiRow').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); draw(); };
+  $('emojiRow').appendChild(b);
+});
+const syncEmojiRow = () => { $('emojiRow').hidden = state.blurStyle !== 'emoji'; };
+$('blurStyle').addEventListener('click', () => setTimeout(syncEmojiRow, 0));
+syncEmojiRow();
 PEN_COLORS.forEach(([c, n]) => {
   const b = document.createElement('button'); b.className = 'pen'; b.style.background = c; b.title = n; b.setAttribute('aria-label', 'Color ' + n);
   b.onclick = () => { state.penColor = c; $('penColors').querySelectorAll('.pen').forEach(x => x.setAttribute('aria-pressed', String(x === b))); };
@@ -797,6 +993,12 @@ cv.addEventListener('pointerdown', e => {
   if (state.active !== cell.i){ state.active = cell.i; syncPhotoUI(); }
   let tool = state.tool;
   if (tool !== 'move' && e.pointerType === 'touch' && penSeen) tool = 'move'; // con Pencil, el dedo mueve
+  if (tool === 'retouch'){
+    const q = toPhotoXY(p, cell, pt);
+    paintMask(p, state.rtool, q, q, state.brushR / q.sc, state.rtool === 'erase');
+    drag = {mode:'retouch', cell, p, last:q};
+    cv.classList.add('dragging'); draw(); return;
+  }
   if (tool === 'draw' || tool === 'brush'){
     const arr = tool === 'draw' ? p.strokes : p.blurStrokes;
     const stroke = {pts:[], color: state.penColor, size: tool === 'draw' ? state.penSize : state.penSize * 6};
@@ -823,6 +1025,15 @@ cv.addEventListener('pointermove', e => {
     if (pinch.cell.i === state.active) syncPhotoUI(); draw(); return;
   }
   if (!drag) return;
+  if (drag.mode === 'retouch'){
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    (evs.length ? evs : [e]).forEach(ev => {
+      const q = toPhotoXY(drag.p, drag.cell, toCanvasXY(ev));
+      const rad = state.brushR / q.sc * (ev.pointerType === 'pen' && ev.pressure > 0 ? 0.6 + ev.pressure*0.8 : 1);
+      paintMask(drag.p, state.rtool, drag.last, q, rad, state.rtool === 'erase'); drag.last = q;
+    });
+    draw(); return;
+  }
   if (drag.mode === 'stroke'){
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     (evs.length ? evs : [e]).forEach(ev => addPoint(drag.stroke, drag.cell, ev));
@@ -838,7 +1049,10 @@ cv.addEventListener('pointermove', e => {
 const endDrag = e => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (drag){ drag = null; cv.classList.remove('dragging'); draw(); }
+  if (drag){
+    if (drag.mode === 'retouch'){ buildAdj(drag.p); thumbsLater(); }
+    drag = null; cv.classList.remove('dragging'); draw();
+  }
 };
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
 cv.addEventListener('wheel', e => {
