@@ -190,7 +190,13 @@ details.tips ul{margin:10px 0 0;padding-left:18px;display:flex;flex-direction:co
       <div class="field"><label class="lbl" for="proc">Procedimiento</label>
         <select id="proc"></select>
         <input type="text" id="procCustom" placeholder="Escribe otro procedimiento" hidden>
+        <input type="text" id="procSub" placeholder="Subtítulo (opcional)" aria-label="Subtítulo del procedimiento">
         <label class="check"><input type="checkbox" id="showProc"> Mostrar título arriba</label>
+        <p class="hint">Al cambiar de procedimiento se ajustan el subtítulo, el tiempo del después y el llamado a la acción. Puedes editarlos.</p>
+      </div>
+      <div class="field"><label class="lbl" for="cta">Llamado a la acción</label>
+        <input type="text" id="cta">
+        <label class="check"><input type="checkbox" id="showCta"> Mostrar franja debajo de las fotos</label>
       </div>
       <div class="field"><label class="lbl" for="bName">Nombre</label><input type="text" id="bName"></div>
       <div class="field"><label class="lbl" for="bSpec">Especialidad</label><input type="text" id="bSpec"></div>
@@ -270,7 +276,21 @@ const THEMES = {
   nude:{name:'Rosa nude',bg:'#EAD7D0',ink:'#3A2A2C',sub:'#7A5D62',accent:'#8E5A5E',chipBg:'rgba(255,248,245,0.92)',chipInk:'#3A2A2C'},
   negro:{name:'Negro elegante',bg:'#141214',ink:'#F4EEEC',sub:'#BCA7A2',accent:'#D2A99B',chipBg:'rgba(20,18,20,0.82)',chipInk:'#F4EEEC'}
 };
-const PROCS = ['Alectomía','Bichectomía','Lipopapada','Bótox','Labios con ácido hialurónico','Armonización orofacial','Otro…'];
+const PROCS = [
+  {g:'Nariz', n:'Alectomía', s:'Afinamiento de las alas nasales', t:'30 días', k:'RINO'},
+  {g:'Nariz', n:'Rinomodelación', s:'Perfilado nasal con ácido hialurónico', t:'Inmediato', k:'RINO'},
+  {g:'Nariz', n:'Alectomía + rinomodelación', s:'Armonía nasal completa', t:'30 días', k:'RINO'},
+  {g:'Labios', n:'Labios con ácido hialurónico', s:'Volumen y contorno natural', t:'Inmediato', k:'LABIOS'},
+  {g:'Contorno facial', n:'Bichectomía', s:'Rostro más definido', t:'3 meses', k:'ROSTRO'},
+  {g:'Contorno facial', n:'Lipopapada', s:'Adiós a la papada', t:'3 meses', k:'PAPADA'},
+  {g:'Contorno facial', n:'Mentón', s:'Proyección con ácido hialurónico', t:'Inmediato', k:'PERFIL'},
+  {g:'Contorno facial', n:'Perfilado facial', s:'Nariz, labios y mentón en armonía', t:'Inmediato', k:'PERFIL'},
+  {g:'Rejuvenecimiento', n:'Bótox', s:'Líneas de expresión suavizadas', t:'15 días', k:'BOTOX'},
+  {g:'Rejuvenecimiento', n:'Armonización orofacial', s:'Armonía de todo el rostro', t:'30 días', k:'CITA'},
+  {g:'Otro', n:'Otro…', s:'', t:'', k:'CITA'}
+];
+const procInfo = n => PROCS.find(p => p.n === n) || PROCS[PROCS.length - 1];
+const ctaFor = k => `Escribe «${k}» por mensaje y agenda tu valoración`;
 const SUBS = ['','Inmediato','7 días','30 días','3 meses'];
 const CITIES = ['Villavicencio','Yopal','Bogotá'];
 
@@ -284,7 +304,7 @@ const state = {
   format:'4:5', layout:'lado', active:0, blurStyle:'blur', guides:false,
   tool:'move', penColor:'#FFFFFF', penSize:8,
   photos:[newPhoto('Antes',''), newPhoto('Después','30 días')],
-  brand:{name:'Dra. Tannia Camargo', spec:'Armonización orofacial', proc:'Alectomía', procCustom:'', showProc:true,
+  brand:{name:'Dra. Tannia Camargo', spec:'Armonización orofacial', proc:'Alectomía', procCustom:'', procSub:'Afinamiento de las alas nasales', showProc:true, cta:ctaFor('RINO'), showCta:true,
     handle:'@dratanniacamargo', cities:{'Villavicencio':true,'Yopal':true,'Bogotá':false},
     disc:'Resultados individuales. Pueden variar en cada paciente.', showDisc:true, showLabels:true, theme:'perla', logo:null}
 };
@@ -373,15 +393,16 @@ function stats(cv){
 function computeLayout(W, H){
   const fmt = state.format, br = state.brand;
   const safeT = fmt === '9:16' ? 220 : 0, safeB = fmt === '9:16' ? 250 : 0;
-  const T = br.showProc ? 118 : 0, F = 200, gap = 8;
-  const top = safeT + T, bottom = H - safeB - F;
+  const T = br.showProc ? (br.procSub ? 150 : 118) : 0, F = 200, gap = 8;
+  const C = br.showCta && br.cta ? 72 : 0;
+  const top = safeT + T, bottom = H - safeB - F - C;
   const ph = bottom - top;
   let cells;
   const one = state.layout === 'single';
   if (one) cells = [{x:0, y:top, w:W, h:ph, i:state.active}];
   else if (state.layout === 'lado') { const cw = (W - gap) / 2; cells = [{x:0,y:top,w:cw,h:ph,i:0},{x:cw+gap,y:top,w:cw,h:ph,i:1}]; }
   else { const ch = (ph - gap) / 2; cells = [{x:0,y:top,w:W,h:ch,i:0},{x:0,y:top+ch+gap,w:W,h:ch,i:1}]; }
-  return {W, H, safeT, safeB, T, F, top, bottom, cells};
+  return {W, H, safeT, safeB, T, F, C, top, bottom, cells};
 }
 
 function coverScale(p, cw, ch){
@@ -505,7 +526,7 @@ function render(x, L, ui){
   // título del procedimiento
   const pn = procName();
   if (br.showProc && pn){
-    const cy = L.safeT + L.T/2;
+    const cy = L.safeT + (br.procSub ? 62 : L.T/2);
     const s = fitFont(x, pn, '600', 56, '"Playfair Display", Georgia, serif', W - 260);
     x.fillStyle = th.ink; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(pn, W/2, cy + 4);
@@ -513,9 +534,24 @@ function render(x, L, ui){
     x.strokeStyle = th.accent; x.lineWidth = 2;
     x.beginPath(); x.moveTo(W/2 - tw/2 - 70, cy + 4); x.lineTo(W/2 - tw/2 - 24, cy + 4); x.moveTo(W/2 + tw/2 + 24, cy + 4); x.lineTo(W/2 + tw/2 + 70, cy + 4); x.stroke();
     x.textBaseline = 'alphabetic';
+    if (br.procSub){
+      x.fillStyle = th.sub; x.font = 'italic 500 30px "Playfair Display", Georgia, serif'; x.textAlign = 'center';
+      fitFont(x, br.procSub, 'italic 500', 30, '"Playfair Display", Georgia, serif', W - 160);
+      x.fillText(br.procSub, W/2, cy + 64);
+    }
+    x.textAlign = 'left';
+  }
+  // llamado a la acción sobre las fotos
+  if (L.C){
+    x.save();
+    x.fillStyle = th.accent; x.fillRect(0, L.bottom, W, L.C);
+    fitFont(x, br.cta, '600', 30, 'Inter, sans-serif', W - 96);
+    x.fillStyle = '#FFFFFF'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(br.cta, W/2, L.bottom + L.C/2 + 1);
+    x.restore();
   }
   // pie de marca
-  const fy = L.bottom, d = 120, lx = 48, ly = fy + (L.F - d)/2;
+  const fy = L.bottom + L.C, d = 120, lx = 48, ly = fy + (L.F - d)/2;
   x.save(); x.beginPath(); x.arc(lx + d/2, ly + d/2, d/2, 0, Math.PI*2); x.closePath();
   if (br.logo){
     x.fillStyle = '#fff'; x.fill(); x.clip();
@@ -669,8 +705,22 @@ $('matchLight').onclick = () => {
 $('label').addEventListener('input', e => { P().label = e.target.value; syncPhotoUI(); draw(); });
 $('blurOn').addEventListener('change', e => { P().blur.on = e.target.checked; draw(); });
 
-PROCS.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; $('proc').appendChild(o); });
-$('proc').addEventListener('change', e => { state.brand.proc = e.target.value; $('procCustom').hidden = e.target.value !== 'Otro…'; draw(); });
+const groups = {};
+PROCS.forEach(p => {
+  if (!groups[p.g]){ groups[p.g] = document.createElement('optgroup'); groups[p.g].label = p.g; $('proc').appendChild(groups[p.g]); }
+  const o = document.createElement('option'); o.value = p.n; o.textContent = p.n; groups[p.g].appendChild(o);
+});
+$('proc').addEventListener('change', e => {
+  const info = procInfo(e.target.value), br = state.brand;
+  br.proc = info.n; br.procSub = info.s; br.cta = ctaFor(info.k);
+  state.photos[1].sub = info.t;
+  $('procCustom').hidden = info.n !== 'Otro…'; $('procSub').value = br.procSub; $('cta').value = br.cta;
+  syncPhotoUI(); draw();
+});
+$('procSub').addEventListener('input', e => { state.brand.procSub = e.target.value; draw(); });
+$('cta').addEventListener('input', e => { state.brand.cta = e.target.value; draw(); });
+$('showCta').addEventListener('change', e => { state.brand.showCta = e.target.checked; draw(); });
+
 $('procCustom').addEventListener('input', e => { state.brand.procCustom = e.target.value; draw(); });
 [['bName','name'],['bSpec','spec'],['bHandle','handle'],['disc','disc']].forEach(([id, k]) => $(id).addEventListener('input', e => { state.brand[k] = e.target.value; draw(); }));
 [['showProc','showProc'],['showDisc','showDisc'],['showLabels','showLabels']].forEach(([id, k]) => $(id).addEventListener('change', e => { state.brand[k] = e.target.checked; draw(); }));
@@ -827,7 +877,7 @@ $('modalClose').onclick = () => { $('modal').hidden = true; };
 state.photos.forEach((p, i) => { p.src = makeSample(i); buildAdj(p); });
 syncSeg('fmt', state.format); syncSeg('lay', state.layout); syncSeg('blurStyle', state.blurStyle);
 document.querySelectorAll('.sw').forEach(s => s.setAttribute('aria-pressed', String(s.dataset.v === state.brand.theme)));
-$('proc').value = state.brand.proc; $('bName').value = state.brand.name; $('bSpec').value = state.brand.spec;
+$('proc').value = state.brand.proc; $('procSub').value = state.brand.procSub; $('cta').value = state.brand.cta; $('showCta').checked = state.brand.showCta; $('bName').value = state.brand.name; $('bSpec').value = state.brand.spec;
 $('bHandle').value = state.brand.handle; $('disc').value = state.brand.disc;
 $('showProc').checked = state.brand.showProc; $('showDisc').checked = state.brand.showDisc; $('showLabels').checked = state.brand.showLabels;
 syncPhotoUI(); thumbs(); draw();
